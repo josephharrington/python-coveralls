@@ -1,5 +1,4 @@
-
-import sys
+from collections import namedtuple
 import os
 
 try:
@@ -8,24 +7,47 @@ except ImportError:
     from subprocess import check_output
 
 FORMAT = '%n'.join(['%H', '%aN', '%ae', '%cN', '%ce', '%s'])
+CommitInfo = namedtuple(
+    'CommitInfo', ['hash', 'author_name', 'author_email', 'committer_name', 'committer_email', 'subject'])
+
+
+def _git_commit_info():
+    """Return a CommitInfo object describing the current head commit."""
+    raw_info = check_output(
+        ['git', '--no-pager', 'log', '-1', '--pretty=format:%s' % FORMAT],
+        universal_newlines=True
+    ).split('\n', 5)
+    return CommitInfo(hash=raw_info[0], author_name=raw_info[1], author_email=raw_info[2], committer_name=raw_info[3],
+                      committer_email=raw_info[4], subject=raw_info[5].strip())
+
+
+def _git_current_branch():
+    """Return the name of the current git branch."""
+    return check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], universal_newlines=True).strip()
+
+
+def _git_fetch_remotes():
+    """Return the list of git fetch remotes in the form: tuple(remote_name, remote_url)."""
+    all_remotes = check_output(['git', 'remote', '-v'], universal_newlines=True).strip().splitlines()
+    return [s.split() for s in all_remotes if s.endswith('(fetch)')]
 
 
 def gitrepo(root):
     tmpdir = os.getcwd()
     os.chdir(root)
-    gitlog = check_output(['git', '--no-pager', 'log', '-1', '--pretty=format:%s' % FORMAT], universal_newlines=True).split('\n', 5)
+    commit_info = _git_commit_info()
     branch = (os.environ.get('CIRCLE_BRANCH') or
-              os.environ.get('TRAVIS_BRANCH', check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).strip()))
-    remotes = [x.split() for x in filter(lambda x: x.endswith('(fetch)'), check_output(['git', 'remote', '-v']).decode().strip().splitlines())]
+              os.environ.get('TRAVIS_BRANCH', _git_current_branch()))
+    remotes = _git_fetch_remotes()
     os.chdir(tmpdir)
     return {
         "head": {
-            "id": gitlog[0],
-            "author_name": gitlog[1],
-            "author_email": gitlog[2],
-            "committer_name": gitlog[3],
-            "committer_email": gitlog[4],
-            "message": gitlog[5].strip(),
+            "id": commit_info.hash,
+            "author_name": commit_info.author_name,
+            "author_email": commit_info.author_email,
+            "committer_name": commit_info.committer_name,
+            "committer_email": commit_info.committer_email,
+            "message": commit_info.subject,
         },
         "branch": branch,
         "remotes": [{'name': remote[0], 'url': remote[1]} for remote in remotes]
